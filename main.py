@@ -1,6 +1,7 @@
 from customer import service_ai
 from admin import admin_main
 from arrange_faq import load_faqs
+from ai_service import ai_choice
 # 主頁功能
 MENU_OPTIONS=[
     (1, "Customer(顧客)"),
@@ -27,8 +28,8 @@ def main():
         if user_choice==1:
             while True:
                 print("進入顧客專區")
-                user_question = input('您好，我是客服小劉，您的問題是?')
-                service_ai(user_question)
+
+                ai_choice()
                 user_continue = input("是否繼續使用(Y/N)")
                 if user_continue not in('Y' , "y"):
                     break
