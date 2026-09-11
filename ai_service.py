@@ -1,12 +1,12 @@
 from openai import OpenAI
-from getpass import getpass
 from utils import load_faqs
 import json
-import pwinput
 from chat_history import load_chat_SQL,create_chat,load_chat,load_chat_Summary
+from AI_env import get_Openai_api_config
 AI_platform = [
     (1, "OpenAI(ChatGPT)"),
 ]
+
 
 def ai_choice():
     chats = load_chat_SQL()
@@ -15,7 +15,7 @@ def ai_choice():
             print (AI_choice)
         user_choice = input("您要使用哪個平台?" )
         if user_choice == "1":
-            API_information = openai_service()
+            API_information = get_Openai_api_config()
             chat_create = input ("您是否需要新開一個聊天室(Y/N)")
         else:
             print("輸入錯誤，請重新嘗試")
@@ -61,21 +61,6 @@ def ai_choice():
                 break
             talk_all(API_information["key"],API_information["model"],chat_name,user_question)
 
-
-def openai_service():
-    api_key = pwinput.pwinput(
-    prompt="請輸入您的 OpenAI API Key:",
-    mask="*"
-    )
-    model_name = input('請輸入您要使用的模型:')
-    client = OpenAI(api_key = api_key)
-   
-
-    user_api = {
-        "key" : client,
-        "model" : model_name
-    }
-    return user_api
 
     
 
@@ -150,15 +135,14 @@ def talk_all(api_key,APImodel,chat_name,user_question):
         - 摘要不可以超過30個字
         - 在30字外，如果使用者有提及過商品名稱、客戶本身的名字、客戶喜歡的對話風格、客戶的要求等，可以做為額外要求記錄下來
     """
-    response = api_key.responses.create(
-            model = APImodel,
-            input = prompt,
-        )
-    summary_response ={
-        "id": next_id,
-        "summary":response.output_text
-    }
-    with open(f"{chat_name}_Summary.json", "w", encoding="utf-8") as chat_file:
-        json.dump(summary_response,chat_file,ensure_ascii=False,indent=2)
-ai_choice()
+        response = api_key.responses.create(
+                model = APImodel,
+                input = prompt,
+            )
+        summary_response ={
+            "id": next_id,
+            "summary":response.output_text
+        }
+        with open(f"{chat_name}_Summary.json", "w", encoding="utf-8") as chat_file:
+            json.dump(summary_response,chat_file,ensure_ascii=False,indent=2)
 

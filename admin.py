@@ -51,7 +51,9 @@ def admin_main():
                         break
                     new_keyword ={"keyword":keywords,"weight":keywords_weight}
                 user_add_keyword.append(new_keyword)
-            add_faq(user_add_topic,user_add_question,user_add_answer,user_add_keyword)
+            new_faq = add_faq(user_add_topic,user_add_question,user_add_answer,user_add_keyword)
+            print(f"""id(編號):{new_faq["id"]}
+主題(topic):{new_faq["topic"]}  """)
         elif admin_choice == 3:
             while True:
                 user_delete_way=input(
@@ -75,6 +77,10 @@ def admin_main():
                     remove_back=remove_faq(user_delete_way,user_delete_faq)
                 if remove_back == 'do not find the question':
                     continue
+                if remove_back == 'deldete success':
+                    print("刪除成功")
+                elif remove_back == 'Undo deletion':
+                    print("刪除取消")
                 break
         elif admin_choice == 4:
             update_faq()

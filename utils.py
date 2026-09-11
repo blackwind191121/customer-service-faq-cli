@@ -1,5 +1,5 @@
 import json
-from arrange_faq import load_faqs
+
 #建立讀取faq函數
 def load_faqs():
     #開啟faq文件
@@ -21,11 +21,6 @@ def delet_faq(faq):
 
 def Change_faq(faq):
     faqs =load_faqs()
-    print("要刪除的 faq：", faq)
-    print("faq 的型別：", type(faq))
-    print("faq 的 ID：", faq.get("id") if isinstance(faq, dict) else "不是 dict")
-    print("要刪除的 faq：", faq)
-    print("目前 faqs：", faqs)
     faqs.remove(faq)
     Change_menu = [
             (1, "ID(編號)"),
