@@ -1,5 +1,7 @@
 from utils import load_faqs ,save_faq,delet_faq,Change_faq
 from arrange_faq import sort_faqs_by_id
+
+
 #展示所有FAQS
 def show_all_faqs():
     faqs = load_faqs()
@@ -167,3 +169,5 @@ def find_faq(find_way, Faq_project):
 
     else:
         return "invalid_find_way"
+
+

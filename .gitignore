@@ -1,3 +1,21 @@
 __pycache__/
 *.pyc
 .env
+
+# Python 環境與快取
+.venv/
+.pytest_cache/
+
+# 私人測試與練習
+test_*.py
+try_*.py
+learn_embedding.py
+
+# 執行時產生的聊天資料
+chat_*.json
+測試聊天室.json
+*_Summary.json
+
+# 可重新建立的向量索引
+faq_index.json
+faq_index_local.json

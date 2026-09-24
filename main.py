@@ -2,6 +2,7 @@ from customer import service_ai
 from admin import admin_main
 from arrange_faq import load_faqs
 from ai_service import ai_choice
+from local_rag_service import load_local_rag
 # 主頁功能
 MENU_OPTIONS=[
     (1, "Customer(顧客)"),
@@ -15,7 +16,7 @@ def show_menu():
         print(f"{num}. {option}")
 # 各選項功能
 def main():
-    load_faqs()
+    rag = load_local_rag()
     while True:
         show_menu()
         user_choice = input("您的身分是:")
@@ -29,7 +30,7 @@ def main():
             while True:
                 print("進入顧客專區")
 
-                ai_choice()
+                ai_choice(rag)
                 user_continue = input("是否繼續使用(Y/N)")
                 if user_continue not in('Y' , "y"):
                     break
