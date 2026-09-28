@@ -1,11 +1,11 @@
 import json
-from pathlib import Path
-
-# 本地向量索引的儲存位置
-INDEX_PATH = Path(__file__).resolve().parent / "faq_index_local.json"
+from data_paths import LOCAL_INDEX_PATH, ensure_data_dirs
+INDEX_PATH = LOCAL_INDEX_PATH
 
 # 將索引寫入 JSON，覆蓋原本內容
 def save_local_index(index):
+    ensure_data_dirs()
+
     with INDEX_PATH.open("w", encoding="utf-8") as file:
         json.dump(index, file, ensure_ascii=False)
 

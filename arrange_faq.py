@@ -1,9 +1,9 @@
-import json
-from utils import load_faqs
-#專門整理json檔案的
+from utils import load_faqs, save_faq
+
+
+# 將 FAQ 按照 ID 排序，並儲存。
 def sort_faqs_by_id():
     faqs = load_faqs()
     faqs.sort(key=lambda faq: faq["id"])
-    with open("faq.json", "w", encoding="utf-8") as faq_file:
-        json.dump(faqs,faq_file, ensure_ascii=False,indent=2)
-    return(faqs)
+    save_faq(faqs)
+    return faqs

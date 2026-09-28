@@ -19,3 +19,11 @@ chat_*.json
 # 可重新建立的向量索引
 faq_index.json
 faq_index_local.json
+
+# 集中存放的聊天資料與向量索引
+/data/chats/
+/data/indexes/
+/data/chat_history.json
+
+# 資料搬遷備份
+/data_backup/

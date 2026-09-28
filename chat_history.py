@@ -2,21 +2,20 @@ import json
 from openai import OpenAI
 from utils import load_faqs
 import os
+from local_llm_service import generate_local_answer
+from data_paths import CHAT_HISTORY_PATH, ensure_data_dirs,get_chat_path,get_summary_path
+
+
 def load_chat_SQL():
     try:
-        with open("chat_history.json","r",encoding="utf-8") as chat_file:
-            chats = json.load(chat_file)
-            return chats
+        with CHAT_HISTORY_PATH.open("r", encoding="utf-8") as chat_file:
+            return json.load(chat_file)
     except FileNotFoundError:
         return []
 
-def create_chat(client, ai_model, user_question, faq_context):
+def create_chat(client, ai_model, user_question, faq_context, provider="openai"):
     chats=load_chat_SQL()
-    chat_history =json.dumps(
-        chats,
-        ensure_ascii= False,
-        indent=2
-    )
+    chat_history =json.dumps(chats,ensure_ascii= False,indent=2)
     existing_id = {chat["id"] for chat in chats}
    
     next_id = 1
@@ -54,28 +53,56 @@ def create_chat(client, ai_model, user_question, faq_context):
     {faq_text}
 
     """
+    # 根據模型來源，使用本地模型或 OpenAI 產生首次回答
+    if provider == "local":
+        result = {
+            # 去除問題前後空白，取前 12 個字元作為聊天室名稱
+            "chat_name": user_question.strip()[:12],
 
-    response = client.responses.create(
-        model= ai_model,
-        input=prompt,
-        text ={
-            "format":{
-                "type" : "json_schema",
-                "name" : "new_chat_response",
-                "strict" : True,
-                "schema":{
-                    "type" :"object",
-                    "properties" :{"chat_name":{"type":"string"},"answer" : {"type":"string"}},
-                    "required" : ["chat_name","answer"],
-                    "additionalProperties": False
-                }
-            }
+            # 將使用者問題與候選 FAQ 交給指定的本地模型回答
+            "answer": generate_local_answer(
+                user_question,
+                faq_context,
+                model_name=ai_model,
+            ),
         }
-         
-     )
-    result = json.loads(response.output_text)
-    answer = result["answer"]
 
+    elif provider == "openai":
+        # 呼叫 OpenAI，透過提示詞產生聊天室名稱與首次回答
+        response = client.responses.create(
+            model=ai_model,
+            input=prompt,
+            text={
+                "format": {
+                    # 指定使用 JSON Schema 定義回傳資料的格式
+                    "type": "json_schema",
+                    "name": "new_chat_response",
+                    "strict": True,
+                    "schema": {
+                        # 回傳資料必須是物件，包含兩個字串欄位
+                        "type": "object",
+                        "properties": {
+                            "chat_name": {"type": "string"},
+                            "answer": {"type": "string"},
+                        },
+
+                        # 兩個欄位都必須提供，且不可加入其他欄位
+                        "required": ["chat_name", "answer"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        )
+
+        # 將模型回傳的 JSON 文字轉成 Python 字典
+        result = json.loads(response.output_text)
+
+    else:
+        # 模型來源不在支援範圍時，指出原因並中止執行
+        raise ValueError(f"不支援的模型來源：{provider}")
+
+    # 兩種來源都整理成相同的字典格式，後續統一取出回答
+    answer = result["answer"]
     # 先清理模型提供的名稱。
     base_name = result["chat_name"]
 
@@ -96,7 +123,7 @@ def create_chat(client, ai_model, user_question, faq_context):
     chat_name = base_name
     suffix = 1
 
-    while (chat_name in existing_names or os.path.exists(f"{chat_name}.json") or os.path.exists(f"{chat_name}_Summary.json")):
+    while (chat_name in existing_names or get_chat_path(chat_name).exists() or get_summary_path(chat_name).exists()):
         chat_name = f"{base_name}_{suffix}"
         suffix += 1
 
@@ -110,12 +137,13 @@ def create_chat(client, ai_model, user_question, faq_context):
     chat = [{"id": 1,"question": user_question,"AI_reply": answer}]
     print(answer)
 
-    # 儲存聊天室清單，方便之後列出與選擇聊天室
-    with open("chat_history.json", "w", encoding="utf-8") as chat_file:
+    # 儲存聊天室清單，方便之後列出與選擇聊天室。
+    ensure_data_dirs()
+    with CHAT_HISTORY_PATH.open("w", encoding="utf-8") as chat_file:
         json.dump(chats, chat_file, ensure_ascii=False, indent=2)
 
-    # 將第一輪對話存入這個聊天室專屬的檔案
-    with open(f"{chat_name}.json", "w", encoding="utf-8") as chat_file:
+    # 將第一輪對話存入 data/chats/ 下的聊天室檔案。
+    with get_chat_path(chat_name).open("w", encoding="utf-8") as chat_file:
         json.dump(chat, chat_file, ensure_ascii=False, indent=2)
 
     # 回傳聊天室名稱，供後續讀取紀錄與繼續對話
@@ -123,7 +151,8 @@ def create_chat(client, ai_model, user_question, faq_context):
 
 # 根據聊天室名稱，讀取完整的對話紀錄
 def load_chat(chat_name):
-    with open(f"{chat_name}.json", "r", encoding="utf-8") as chat_file:
+    # 從固定的聊天室資料夾讀取對話。
+    with get_chat_path(chat_name).open("r", encoding="utf-8") as chat_file:
         chat = json.load(chat_file)
 
     return chat
@@ -132,11 +161,15 @@ def load_chat(chat_name):
 # 讀取聊天室摘要，若尚未建立摘要檔案則回傳初始資料
 def load_chat_Summary(chat_name):
     try:
-        with open(f"{chat_name}_Summary.json","r",encoding="utf-8") as chat_file:
-            chats_Summary = json.load(chat_file)
+        # 從固定的聊天室資料夾讀取摘要。
+        with get_summary_path(chat_name).open("r", encoding="utf-8") as chat_file:
+            chats_summary = json.load(chat_file)
 
-        return chats_Summary
+        return chats_summary
 
     except FileNotFoundError:
-        # 這裡只回傳預設值，不會建立摘要檔案
-        return {"id": 0,"summary": "尚未任何摘要",}
+        # 新聊天室可能尚未產生摘要。
+        return {
+            "id": 0,
+            "summary": "尚未有任何摘要",
+        }
