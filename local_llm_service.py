@@ -1,5 +1,14 @@
 import json
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from http.client import HTTPException
+
+from errors import ChatModelError
+
+
+#代表本地模型呼叫失敗。
+class LocalModelError(ChatModelError):
+    pass
 
 def call_local_model(messages, model_name="qwen3:8b"):
     # 接收已準備好的訊息，交給本地模型。
@@ -17,9 +26,39 @@ def call_local_model(messages, model_name="qwen3:8b"):
         method="POST",
     )
 
-    with urlopen(request, timeout=120) as response:
-        result = json.load(response)
+    # 呼叫本地模型，等待回應並將 JSON 解析成 Python 字典
+    try:
+        with urlopen(request, timeout=120) as response:
+            result = json.load(response)
 
+    # 已連上服務，但服務回傳 HTTP 錯誤狀態
+    except HTTPError as error:
+        # 將 HTTP 狀態碼放進提示，並用from error保留原始錯誤原因
+        raise LocalModelError(
+            f"本地模型服務回報錯誤（HTTP {error.code}），"
+            "請確認模型名稱與 Ollama 狀態。"
+        ) from error
+
+    # 連線或讀取回應時，等待時間超過設定的限制
+    except TimeoutError as error:
+        raise LocalModelError(
+            "本地模型回應逾時，請稍後再試。"
+        ) from error
+
+    # 處理連線失敗，例如 Ollama 尚未啟動或連線遭拒
+    except URLError as error:
+        # 部分逾時錯誤會包在 URLError 裡，透過 reason 檢查實際原因
+        if isinstance(error.reason, TimeoutError):
+            raise LocalModelError(
+                "連線至本地模型時逾時，請稍後再試。"
+            ) from error
+
+        # 其餘連線錯誤統一轉成 LocalModelError，交給呼叫端處理
+        raise LocalModelError(
+            "無法連線至本地模型，請確認 Ollama 已啟動。"
+        ) from error
+
+    # 請求成功且 JSON 解析完成後，取出正式回答文字並回傳
     return result["message"]["content"]
 
 def generate_local_answer(question, faq_context, model_name="qwen3:8b",recent_chat=None,chat_summary=None):
@@ -127,3 +166,88 @@ def generate_local_recap(
 
     # 使用共用函式呼叫指定的本地模型，將回顧文字交回呼叫端
     return call_local_model(messages, model_name=model_name)
+
+# 呼叫本地模型，以串流方式逐段交出回答文字
+def stream_local_model(messages, model_name="qwen3:8b"):
+    # 準備送給 Ollama 的資料，關閉思考模式並開啟串流
+    payload = {"model": model_name,"messages": messages,"think": False,"stream": True}
+
+    # 建立 HTTP 請求：將 Python 字典轉成 JSON，再編碼成位元組
+    # localhost 代表自己的電腦，這裡連線到本機的 Ollama 服務
+    request = Request(
+        "http://localhost:11434/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    # 記錄是否收到模型的完成標記，避免把中途斷線當成正常結束
+    completed = False
+
+    try:
+        # 實際送出請求並開啟回應串流
+        # 離開 with 區塊時，會自動關閉回應
+        with urlopen(request, timeout=120) as response:
+            # 逐行接收資料，每一行都是一份獨立的 JSON
+            for line in response:
+                # 空白行不需要解析，直接讀取下一行
+                if not line.strip():
+                    continue
+
+                # 將這一行 JSON 轉成 Python 資料，正常情況下是字典
+                chunk = json.loads(line)
+
+                # 服務可能在串流途中回報錯誤，這時中止並交給外層處理
+                if "error" in chunk:
+                    raise LocalModelError(
+                        f"本地模型回報錯誤：{chunk['error']}"
+                    )
+
+                # 取出這一段正式回答；沒有文字時使用空字串
+                text = chunk.get("message", {}).get("content", "")
+
+                # 有文字才交給呼叫端，之後可繼續接收下一段
+                if text:
+                    yield text
+
+                # 收到 done=True 才標記完成，並停止讀取
+                if chunk.get("done") is True:
+                    completed = True
+                    break
+
+    # 已收到 HTTP 回應，但狀態碼表示請求失敗
+    # HTTPError 是 URLError 的子類別，因此放在前面處理
+    except HTTPError as error:
+        raise LocalModelError(
+            f"本地模型服務回報錯誤（HTTP {error.code}）。"
+        ) from error
+
+    # 無法建立連線，或連線階段的錯誤被包在 URLError 裡
+    except URLError as error:
+        raise LocalModelError(
+            "無法連線至本地模型，或連線逾時，請確認 Ollama 狀態。"
+        ) from error
+
+    # 接收資料時等待過久，不能把已收到的片段當成完整答案
+    except TimeoutError as error:
+        raise LocalModelError(
+            "接收本地模型回答逾時，回答可能尚未完成。"
+        ) from error
+
+    # 處理連線中斷或 HTTP 傳輸異常
+    except (OSError, HTTPException) as error:
+        raise LocalModelError(
+            "接收本地模型回答時連線中斷，回答尚未完成。"
+        ) from error
+
+    # 收到的資料無法解碼，或不是合法的 JSON
+    except (json.JSONDecodeError, UnicodeError) as error:
+        raise LocalModelError(
+            "本地模型回傳的資料格式無法解析。"
+        ) from error
+
+    # 即使讀取過程沒有拋錯，沒有完成標記仍視為不完整回答
+    if not completed:
+        raise LocalModelError(
+            "本地模型未回報完成，回答可能中途截斷。"
+        )

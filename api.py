@@ -3,15 +3,18 @@ from pydantic import BaseModel
 from utils import load_faqs
 from faq_service import search_faq
 from fastapi.responses import StreamingResponse
-from ai_service import talk_all_stream
 from AI_env import get_Openai_api_config
 from openai import OpenAI
 from contextlib import asynccontextmanager
-
+from data_paths import validate_chat_name
 from starlette.concurrency import run_in_threadpool
 from local_rag_service import load_local_rag, retrieve_faq_context
+from chat_service import answer_stream
+import logging
+from fastapi import FastAPI, HTTPException
+from errors import ChatModelError
 
-
+logger = logging.getLogger(__name__)
 # 服務啟動時載入本地模型與索引，保存起來供後續請求使用
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +39,7 @@ class ChatRequest(BaseModel):
 class ChatStreamRequest(BaseModel):
     chat_name: str
     user_question: str
+    provider: str = "local"
 
 
 # 首頁：回傳簡單訊息，確認 API 可以回應
@@ -63,26 +67,45 @@ def chat(request: ChatRequest):
 # 串流對話：先用本地向量搜尋 FAQ，再交給雲端 AI 回答
 @app.post("/chat_stream")
 def chat_stream(request: ChatStreamRequest):
-    # 重複使用啟動時載入的模型與索引，取得最多三筆參考 FAQ
+    if request.provider not in ("openai", "local"):
+        raise HTTPException(status_code=400, detail="provider 必須是 openai 或 local")
+    question = request.user_question.strip()
+
+    if not question:
+        raise HTTPException(
+            status_code=400,
+            detail="問題不能是空白"
+        )
+    try:
+        chat_name = validate_chat_name(request.chat_name)
+    except ValueError as error:
+        raise HTTPException(status_code=400,detail=str(error)) from error
     faq_context = retrieve_faq_context(
-        question=request.user_question,
+        question=question,
         rag=app.state.rag,
-        top_k=3)
+        top_k=3,
+    )
 
-    # 取得 OpenAI 用戶端物件與回答模型名稱
-    API_information = get_Openai_api_config()
-    client = API_information["key"]
-    model_name = API_information["model"]
+    # 本地模型不需要 OpenAI 用戶端，也不該因為缺 key 而卡住
+    if request.provider == "openai":
+        api_info = get_Openai_api_config()
+        client, model = api_info["key"], api_info["model"]
+    else:
+        client, model = None, "qwen3:8b"
 
-    # 建立產生器，逐段將 AI 回答交給串流回應
     def event_generator():
-        for chunk in talk_all_stream(
-            api_key=client,
-            APImodel=model_name,
-            chat_name=request.chat_name,
-            user_question=request.user_question,
-            faq_context=faq_context):
-            yield chunk
+        try:
+            yield from answer_stream(
+                client=client,
+                model=model,
+                provider=request.provider,
+                chat_name=chat_name,
+                question=question,
+                faq_context=faq_context,
+            )
+        except ChatModelError as error:
+            # 串流已開始，HTTP 狀態碼已是 200，只能在結尾補一行錯誤標記
+            logger.warning("stream failed chat=%s: %s", request.chat_name, error)
+            yield f"\n[ERROR] {error}"
 
-    # 將產生器提供的文字片段，逐段傳送給呼叫端
-    return StreamingResponse(event_generator(),media_type="text/plain")
+    return StreamingResponse(event_generator(), media_type="text/plain")
