@@ -75,9 +75,9 @@ def admin_main():
                     remove_back=remove_faq(user_delete_way,user_delete_faq)
                 else:
                     remove_back=remove_faq(user_delete_way,user_delete_faq)
-                if remove_back == 'do not find the question':
+                if remove_back is None:
                     continue
-                if remove_back == 'deldete success':
+                if remove_back == 'delete success':
                     print("刪除成功")
                 elif remove_back == 'Undo deletion':
                     print("刪除取消")
