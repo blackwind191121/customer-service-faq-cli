@@ -1,5 +1,28 @@
 from utils import load_faqs ,save_faq,delet_faq,Change_faq
 from arrange_faq import sort_faqs_by_id
+from faq_draft_service import validate_faq_draft
+
+
+def save_faq_revision(original_faq, draft):
+    """更新既有 FAQ 的內容，保留 ID、關鍵字及其他欄位。"""
+    cleaned = validate_faq_draft(draft)
+    faqs = load_faqs()
+
+    for index, current in enumerate(faqs):
+        if current["id"] != original_faq["id"]:
+            continue
+
+        # 模型產生草稿與人工編輯需要時間；確認原資料尚未被改動。
+        if current != original_faq:
+            raise ValueError("這筆 FAQ 已被修改，請重新讀取後再產生草稿")
+
+        updated = current.copy()
+        updated.update(cleaned)
+        faqs[index] = updated
+        save_faq(faqs)
+        return updated
+
+    raise ValueError("這筆 FAQ 已不存在，無法儲存修改")
 
 
 #展示所有FAQS
