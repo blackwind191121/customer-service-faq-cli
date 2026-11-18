@@ -1,4 +1,5 @@
-from faq_service import show_all_faqs,add_faq,remove_faq,update_faq,save_faq_revision
+from faq_service import show_all_faqs,add_faq,remove_faq,update_faq,save_faq_revision,delete_faq_if_unchanged
+from faq_delete_service import suggest_faq_deletions
 from faq_draft_service import generate_faq_draft, validate_faq_draft, generate_faq_revision
 from errors import ChatModelError
 from utils import load_faqs
@@ -287,6 +288,70 @@ def preview_faq_revision():
     print(f"FAQ 已更新，ID：{updated['id']}，標題：{updated['topic']}")
 
 
+def preview_faq_deletions():
+    faqs = load_faqs()
+    if not faqs:
+        print("目前沒有可刪除的 FAQ。")
+        return
+
+    request_text = input("請描述想移除的 FAQ（0 取消）：").strip()
+    if request_text == "0":
+        return
+    if not request_text:
+        print("刪除需求不能是空白。")
+        return
+
+    try:
+        print("正在尋找刪除候選，請稍候……")
+        candidates = suggest_faq_deletions(request_text, faqs)
+    except ChatModelError as error:
+        print(f"模型服務發生問題：{error}")
+        return
+    except ValueError as error:
+        print(f"無法取得有效候選：{error}")
+        return
+
+    if not candidates:
+        print("沒有提出合適的刪除候選。若只是變更政策，請使用修改 FAQ。")
+        return
+
+    faq_by_id = {faq["id"]: faq for faq in faqs}
+    deleted_count = 0
+    print("以下僅為 AI 建議，請逐筆核對；選 Y 會立即刪除該筆 FAQ。")
+    for candidate in candidates:
+        original = faq_by_id[candidate["faq_id"]]
+        print(f"\n候選 FAQ ID：{original['id']}")
+        print(f"候選理由：{candidate['reason']}")
+        print(f"標題：{original['topic']}")
+        for number, question in enumerate(original["questions"], start=1):
+            print(f"{number}. {question}")
+        print(f"答案：{original['answer']}")
+        print("關鍵字與權重：")
+        for item in original.get("keywords", []):
+            print(f"- {item['keyword']}：{item['weight']}")
+
+        while True:
+            confirm = input("刪除此筆？Y 刪除、N 跳過、0 結束（已刪除的不會復原）：").strip().upper()
+            if confirm in ("Y", "N", "0"):
+                break
+            print("請輸入 Y、N 或 0。")
+        if confirm == "0":
+            break
+        if confirm == "N":
+            print("已跳過，這筆 FAQ 未刪除。")
+            continue
+
+        try:
+            removed = delete_faq_if_unchanged(original)
+        except ValueError as error:
+            print(f"無法刪除：{error}。本次停止，請重新查找。")
+            break
+        deleted_count += 1
+        print(f"已刪除 FAQ ID：{removed['id']}，標題：{removed['topic']}")
+
+    print(f"本次共刪除 {deleted_count} 筆 FAQ。")
+
+
 #開發者主程式
 def admin_main():
     while True:
@@ -343,6 +408,14 @@ def admin_main():
             print(f"""id(編號):{new_faq["id"]}
 主題(topic):{new_faq["topic"]}  """)
         elif admin_choice == 3:
+            while True:
+                use_ai = input("是否使用 AI 輔助尋找刪除候選？(Y/N)：").strip().upper()
+                if use_ai in ("Y", "N"):
+                    break
+                print("請輸入 Y 或 N。")
+            if use_ai == "Y":
+                preview_faq_deletions()
+                continue
             while True:
                 user_delete_way=input(
                     "您打算如何查找您要刪除的選項:" \

@@ -3,6 +3,20 @@ from arrange_faq import sort_faqs_by_id
 from faq_draft_service import validate_faq_draft
 
 
+def delete_faq_if_unchanged(original_faq):
+    """刪除已由員工確認的那筆 FAQ；內容變動時拒絕刪除。"""
+    faqs = load_faqs()
+    for index, current in enumerate(faqs):
+        if current["id"] != original_faq["id"]:
+            continue
+        if current != original_faq:
+            raise ValueError("這筆 FAQ 已被修改，請重新查找並確認")
+        removed = faqs.pop(index)
+        save_faq(faqs)
+        return removed
+    raise ValueError("這筆 FAQ 已不存在，請重新查找")
+
+
 def save_faq_revision(original_faq, draft):
     """更新既有 FAQ 的內容，保留 ID、關鍵字及其他欄位。"""
     cleaned = validate_faq_draft(draft)
